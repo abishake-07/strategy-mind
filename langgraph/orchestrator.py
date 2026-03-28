@@ -69,18 +69,48 @@ def _assemble_prompt(query: str, docs=None, traversal=None, competitors=None, pl
 def orchestrate_query(query: str, hf_model: Optional[str] = None) -> str:
     """Orchestrate a query across RAG and graph tools, return generated answer string."""
     with tracer.start_as_current_span("orchestrate_query", attributes={"query": query}) as span:
-        # Step 1: semantic doc search
-        with tracer.start_as_current_span("document_search") as doc_span:
-            try:
-                docs = document_search(query, k=6)
-            except Exception as e:
-                docs = []
-            doc_span.set_attribute("num_docs", len(docs))
-
-        # Step 2: detect entities
+        # Step 1: detect entities first (before doc search, to enrich the query)
         companies = _detect_companies_in_query(query)
         industries = _detect_industries_in_query(query)
 
+        # Step 2: enrich semantic search with graph context
+        enriched_query = query
+        enrichment_context = []
+
+        if companies or industries:
+            # Add entity names to context
+            if companies:
+                enrichment_context.append(f"Companies: {', '.join(companies)}")
+            if industries:
+                enrichment_context.append(f"Industries: {', '.join(industries)}")
+
+            # Add strategies from companies for better retrieval
+            if companies:
+                with tracer.start_as_current_span("fetch_company_context") as ctx_span:
+                    for company in companies:
+                        q = "MATCH (c:Company {name: $company})-[:PURSUES]->(s:Strategy) RETURN collect(DISTINCT s.name) as strategies"
+                        rows = run_read(q, {"company": company})
+                        if rows and rows[0].get('strategies'):
+                            strategies = rows[0]['strategies']
+                            enrichment_context.append(f"{company} strategies: {', '.join(strategies)}")
+                            ctx_span.set_attribute(f"strategies_{company}", strategies)
+
+            enriched_query = f"{query}\n\nContext: {'; '.join(enrichment_context)}"
+            with tracer.start_as_current_span("query_enrichment") as enrich_span:
+                enrich_span.set_attribute("original_query", query)
+                enrich_span.set_attribute("enriched_query", enriched_query)
+                enrich_span.set_attribute("context_parts", len(enrichment_context))
+
+        # Step 3: semantic doc search with enriched query
+        with tracer.start_as_current_span("document_search") as doc_span:
+            try:
+                docs = document_search(enriched_query, k=6)
+            except Exception as e:
+                docs = []
+            doc_span.set_attribute("num_docs", len(docs))
+            doc_span.set_attribute("enriched", bool(companies or industries))
+
+        # Step 4: graph traversal and entity-specific tools
         traversal = None
         competitors = None
         playbooks = None
