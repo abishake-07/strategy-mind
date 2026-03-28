@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -u neo4j:neo4j@123 http://localhost:7474/db/neo4j/tx -H 'Content-Type: application/json' -d '{\"\"\"\"statements\"\"\"\":[{\"\"\"\"statement\"\"\"\":\"\"\"\"RETURN 1\"\"\"\"}]}')",
+      "Bash(cmdkey /list)",
+      "Bash(\"$USERPROFILE/.Neo4jDesktop/relate-data/dbmss/dbms-9d2e6a5d-b45f-4caf-b625-b4ba0ea8c7aa/bin/neo4j-admin.bat\" dbms:*)",
+      "Bash(docker run:*)"
+    ]
+  }
+}
